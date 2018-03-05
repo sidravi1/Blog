@@ -1,0 +1,359 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title></title>
+  <meta name="Generator" content="Cocoa HTML Writer">
+  <meta name="CocoaVersion" content="1561.2">
+  <style type="text/css">
+    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; line-height: 14.0px; font: 12.0px Times; color: #000000; -webkit-text-stroke: #000000; min-height: 14.0px}
+    p.p3 {margin: 0.0px 0.0px 12.0px 0.0px; line-height: 14.0px; font: 12.0px Times; color: #000000; -webkit-text-stroke: #000000}
+    p.p4 {margin: 0.0px 0.0px 0.0px 0.0px; line-height: 14.0px; font: 12.0px Times; color: #000000; -webkit-text-stroke: #000000}
+    p.p5 {margin: 0.0px 0.0px 0.0px 0.0px; line-height: 14.0px; font: 12.0px Courier; color: #000000; -webkit-text-stroke: #000000}
+    p.p6 {margin: 0.0px 0.0px 0.0px 0.0px; line-height: 14.0px; font: 12.0px Courier; color: #000000; -webkit-text-stroke: #000000; min-height: 14.0px}
+    li.li4 {margin: 0.0px 0.0px 0.0px 0.0px; line-height: 14.0px; font: 12.0px Times; color: #000000; -webkit-text-stroke: #000000}
+    span.s1 {font-kerning: none}
+    span.s2 {text-decoration: underline ; font-kerning: none; color: #0000ee; -webkit-text-stroke: 0px #0000ee}
+    span.s3 {-webkit-text-stroke: 0px #000000}
+    span.Apple-tab-span {white-space:pre}
+    ul.ul1 {list-style-type: disc}
+  </style>
+</head>
+<body>
+<p class="p1"><span class="s1"></span><br></p>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; line-height: 28.0px; font: 24.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>Simulated Annealing Example: Nurse scheduling problem</b></span><span class="s2"><b>¶</b></span></h1>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">This code does a quick and dirty implementation (globals everywhere... oof) of simulated annealing to solve a simple nurse scheduling problem. It was written as an example for my blog. If you are going to actually implement it, I'd write some proper classes to handle the data.</span></p>
+<p class="p4"><span class="s1">In [8]:</span></p>
+<p class="p5"><span class="s1">%matplotlib inline</span></p>
+<p class="p4"><span class="s1">In [9]:</span></p>
+<p class="p5"><span class="s1">import pandas as pd</span></p>
+<p class="p5"><span class="s1">import numpy as np</span></p>
+<p class="p5"><span class="s1">import seaborn as sns</span></p>
+<p class="p5"><span class="s1">import matplotlib.pyplot as plt</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">from collections import namedtuple</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">from functools import partial</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<h2 style="margin: 0.0px 0.0px 14.9px 0.0px; line-height: 22.0px; font: 18.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>Define parameters</b></span><span class="s2"><b>¶</b></span></h2>
+<p class="p3"><span class="s1">Let's define some parameters.</span></p>
+<ul class="ul1">
+  <li class="li4"><span class="s3"></span><span class="s1">We'll have 10 nurses and build a schedule for 10 weeks.</span></li>
+  <li class="li4"><span class="s3"></span><span class="s1">Each nurse has a preference for how many days he prefers to work per week. We generate this uniformly (but you don't have to).<span class="Apple-converted-space"> </span></span></li>
+  <li class="li4"><span class="s3"></span><span class="s1">Each nurse has a per shift cost. We generate this uniformly (but you don't have to)</span></li>
+</ul>
+<p class="p3"><span class="s1">In a more complex implementation, I had contracted number of days per month and preferred length, i.e. how many days in a row the nurse would like to work, as different objectives. I also had multiple 'wards' within the hospital and a loss component that makes sure same person isn't working in different wards at the same time.</span></p>
+<p class="p3"><span class="s1">You can take this scaffolding and make it as complex as you like.</span></p>
+<p class="p4"><span class="s1">In [10]:</span></p>
+<p class="p5"><span class="s1">num_nurses = 10</span></p>
+<p class="p5"><span class="s1">num_weeks = 10</span></p>
+<p class="p5"><span class="s1">preferred_len = np.random.randint(1, 6, 10)</span></p>
+<p class="p5"><span class="s1">cost = np.random.randint(1, 7, 10)</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">We also want to make sure that they are being equally staffed.</span></p>
+<p class="p4"><span class="s1">In [11]:</span></p>
+<p class="p5"><span class="s1">total_len = preferred_len.sum()</span></p>
+<p class="p5"><span class="s1">preferred_len_prob = [x/total_len for x in preferred_len]</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Define <i>Week</i> class ('namedtuple' FTW).</span></p>
+<p class="p4"><span class="s1">In [12]:</span></p>
+<p class="p5"><span class="s1">days_of_week = ['m','tu','w','th','f','sa','su']</span></p>
+<p class="p5"><span class="s1">Weektuple = namedtuple('week', days_of_week)</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">class Week(Weektuple):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>def days_works(self, n):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>''' Returns the number days worked by nurse n'''</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>return sum([x==n for x in self])</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Define a <i>schedule</i> as a list of <i>weeks</i></span></p>
+<p class="p4"><span class="s1">In [13]:</span></p>
+<p class="p5"><span class="s1">schedule = [Week(**dict(zip(days_of_week, np.random.randint(0,10,10)))) for w in range(num_weeks)]</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<h2 style="margin: 0.0px 0.0px 14.9px 0.0px; line-height: 22.0px; font: 18.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>Define functions</b></span><span class="s2"><b>¶</b></span></h2>
+<p class="p1"><span class="s1"></span><br></p>
+<h3 style="margin: 0.0px 0.0px 14.0px 0.0px; line-height: 17.0px; font: 14.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>The loss function</b></span><span class="s2"><b>¶</b></span></h3>
+<p class="p3"><span class="s1">We define loss as being the sum of two (three) things:</span></p>
+<ul class="ul1">
+  <li class="li4"><span class="s3"></span><span class="s1">len_loss: the loss from not meeting the nurse's preferred length</span></li>
+  <li class="li4"><span class="s3"></span><span class="s1">shift_loss: the loss from not scheduling everyone evenly as per their preferred length</span></li>
+  <li class="li4"><span class="s3"></span><span class="s1">(optional) staffing_cost: the total cost of the schedule</span></li>
+</ul>
+<p class="p3"><span class="s1">I commented out staffing_cost because I wanted to see how it balanced the other two. With it on, it put the cheaper ones on more and I have trouble visually verifying that the other criteria were being satisfied.</span></p>
+<p class="p3"><span class="s1">You may want to weight the different things differently. The <i>weights</i> mapping, lets you do that.</span></p>
+<p class="p4"><span class="s1">In [24]:</span></p>
+<p class="p5"><span class="s1">def loss_func(schedule, weights = None):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>l1 = sum([len_loss(w) for w in schedule])</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>#l2 = staffing_cost(schedule)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>l3 = shift_loss(schedule)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>if weights is None:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>weights = {'l1':1, 'l2':1, 'l3':1}</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return weights['l1'] * l1 + weights['l3']*l3</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">We are only looking the <i>difference</i> between the preferred days and days worked. You could set it up as a percentage. So getting a 6 days shift if you prefer 7 is not as bad as getting a 2 day shift when you prefer 1.</span></p>
+<p class="p4"><span class="s1">In [15]:</span></p>
+<p class="p5"><span class="s1">def len_loss(w):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>loss = 0</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>for n in range(num_nurses):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>n_work_days = w.days_works(n)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>if w.days_works(n) &gt; 0:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>loss += np.abs(n_work_days - preferred_len[n])</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return loss</span></p>
+<p class="p4"><span class="s1">In [16]:</span></p>
+<p class="p5"><span class="s1">def staffing_cost(schedule):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return sum([staffing_cost_week(w) for w in schedule])</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">def staffing_cost_week(week):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return sum([cost[n] * week.days_works(n) for n in range(num_nurses)])</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">The share of shifts must be close to the share based on preferred lengths</span></p>
+<p class="p4"><span class="s1">In [17]:</span></p>
+<p class="p5"><span class="s1">def shift_loss(schedule):</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>total_shifts = np.zeros(num_nurses)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>for w in schedule:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>for n in range(num_nurses):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>total_shifts[n] = w.days_works(n)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>total_shifts = total_shifts / total_shifts.sum()</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return 2 * num_nurses * num_weeks * np.abs(preferred_len_prob - total_shifts).sum()</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<h3 style="margin: 0.0px 0.0px 14.0px 0.0px; line-height: 17.0px; font: 14.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>The proposal function</b></span><span class="s2"><b>¶</b></span></h3>
+<p class="p3"><span class="s1">The proposal function is pretty easy. Change "perc_flip" percent of weeks in the schedue. For each of those works, increment "per_flip" random nurse id.</span></p>
+<p class="p3"><span class="s1">Note that this has the property that all states are <i>communicable</i> (all combinations of staffing is possible) and the chain has <i>detailed balance</i>. You can easily reverse the change, just reduce nurse id by 1.</span></p>
+<p class="p4"><span class="s1">In [18]:</span></p>
+<p class="p5"><span class="s1">def proposal(schedule, perc_flip = 0.5, per_flip = 2):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>weeks_to_flip = [ x for x in range(len(schedule)) if (np.random.random() &gt; perc_flip) ]</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>#print(weeks_to_flip)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>new_schedule = schedule.copy()</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>for w in weeks_to_flip:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>new_schedule[w] = increment(new_schedule[w], per_flip)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return new_schedule</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">def increment(w, num = 2):</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>new_w = w._asdict()</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>for i in range(num):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>day = days_of_week[np.random.randint(0, 7)]</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>if new_w[day] == (num_nurses - 1): new_w[day] = 0</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>else: new_w[day] += 1</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return Week(**new_w)</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<h3 style="margin: 0.0px 0.0px 14.0px 0.0px; line-height: 17.0px; font: 14.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>The simulated annealing function</b></span><span class="s2"><b>¶</b></span></h3>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">This is the workhorse that actually does the annealing. A lot of this code is borrowed from AM207 (Rahul Dave and team) but it's pretty standard stuff - I just didn't want to have to write it.</span></p>
+<p class="p4"><span class="s1">In [20]:</span></p>
+<p class="p5"><span class="s1">def sim_anneal(energyfunc, initials, epochs, tempfunc, iterfunc, proposalfunc):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>"""</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>Run simulated annealing.</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>"""</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>accumulator=[]</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># Our initial state is in initials['solution']</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>best_solution = old_solution = initials['solution']</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># Our initial temperature is in initials['T']</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>T=initials['T']</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># Our initial length (i.e. number of iterations per epoch)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># is in initals['length']</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>length=initials['length']</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># initialize the energy of our current state by running the<span class="Apple-converted-space"> </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># energy function on our initial solution</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>best_energy = old_energy = energyfunc(old_solution)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># keep track of accepted proposals and total iterations</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>accepted=0</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>total=0</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>for index in range(epochs):</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span># if we're past the first index, we need</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span># to update our cooling schedule and iteration</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span># schedule</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>if index &gt; 0:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>T = tempfunc(T)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>length=iterfunc(length)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>if not index % 5:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>print("EPOCH", index, ": Temperature %0.2f" % T, "Length", length, 'Loss %0.2f' % best_energy)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span># run through the iterations for each epoch</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>for it in range(length):</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span># keep track of total proposals</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>total+=1</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span># get a new proposal and calculate its energy</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>new_solution = proposalfunc(old_solution)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>new_energy = energyfunc(new_solution)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span># Use a min here as you could get a "probability" &gt; 1</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>alpha = min(1, np.exp((old_energy - new_energy)/T))</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>if ((new_energy &lt; old_energy) or (np.random.uniform() &lt; alpha)):</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">                </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span># Accept proposed solution</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span>accepted += 1.0</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span>accumulator.append({'epoch':index, 'T':T, 'schedule':new_solution,<span class="Apple-converted-space"> </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                                    </span>'loss':new_energy, 'iteration':total})</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">                </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span># we have a new candidate for optimum (minimum)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span>if new_energy &lt; best_energy:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                    </span># Replace previous best with this one</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                    </span>best_energy = new_energy</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                    </span>best_solution = new_solution</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                    </span>best_index=total</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                    </span>best_temp=T</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">                    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span>old_energy = new_energy</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span>old_solution = new_solution</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">                </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">            </span>else:</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span># Keep track of old solution if we don't accept the new one</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                </span>accumulator.append({'epoch':index, 'T':T, 'schedule':old_solution,<span class="Apple-converted-space"> </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">                                    </span>'loss':old_energy, 'iteration':total})</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">                </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span># Print some results</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>print("------")</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>print("\nFrac accepted : ", accepted/total, "\nTotal iterations : ", total, "\nSolution :", old_solution)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>print("Final Energy :", best_energy, "Final length :", length)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return best_energy, best_solution, accumulator</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<h3 style="margin: 0.0px 0.0px 14.0px 0.0px; line-height: 17.0px; font: 14.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>Plot the results</b></span><span class="s2"><b>¶</b></span></h3>
+<p class="p3"><span class="s1">This function just draws a heatmap that helps to visualize the final schedule.</span></p>
+<p class="p4"><span class="s1">In [21]:</span></p>
+<p class="p5"><span class="s1">def plot_schedule(schedule):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>all_data = {}</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>for i, w in enumerate(bs):</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">        </span>all_data['week' + str(i)] = w._asdict()</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>df = pd.DataFrame(all_data)</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>df = df.loc[days_of_week,:].T</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>fig, ax = plt.subplots(1,1,figsize=(10,8))</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>ax = sns.heatmap(df, cmap="Set1", linewidths=1, square=True, ax = ax)</span></p>
+<p class="p6"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>cbar = ax.collections[0].colorbar</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>cbar.set_ticks(np.linspace(0.5, num_nurses - 1 + 0.5, num_nurses ))</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>cbar.set_ticklabels(np.linspace(0.5, num_nurses - 1 + 0.5, num_nurses ) - 0.5)</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">    </span>return df</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<h2 style="margin: 0.0px 0.0px 14.9px 0.0px; line-height: 22.0px; font: 18.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>Results</b></span><span class="s2"><b>¶</b></span></h2>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Try playing around with <i>perc_flip</i> and <i>per_flip</i>. Now that I think about it, these are terribly named. Sorry - doing this late at night makes for bad variable name choices.</span></p>
+<p class="p4"><span class="s1">In [25]:</span></p>
+<p class="p5"><span class="s1">prop_part = partial(proposal, perc_flip = 0.5, per_flip = 3)</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Set initials and run it!</span></p>
+<p class="p4"><span class="s1">In [26]:</span></p>
+<p class="p5"><span class="s1">initials = {}</span></p>
+<p class="p5"><span class="s1">initials['T'] = 5000</span></p>
+<p class="p5"><span class="s1">initials['solution'] = schedule</span></p>
+<p class="p5"><span class="s1">initials['length'] = 7</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">epochs = 90</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">tempfunc = lambda t: t * 0.9</span></p>
+<p class="p5"><span class="s1">lengthfunc = lambda l : int(np.ceil(l * 1.1))</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">be, bs, acc = sim_anneal(loss_func, initials, epochs, tempfunc, lengthfunc, prop_part)</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">EPOCH 0 : Temperature 5000.00 Length 7 Loss 324.89</span></p>
+<p class="p5"><span class="s1">EPOCH 5 : Temperature 2952.45 Length 13 Loss 186.10</span></p>
+<p class="p5"><span class="s1">EPOCH 10 : Temperature 1743.39 Length 24 Loss 186.10</span></p>
+<p class="p5"><span class="s1">EPOCH 15 : Temperature 1029.46 Length 41 Loss 186.10</span></p>
+<p class="p5"><span class="s1">EPOCH 20 : Temperature 607.88 Length 70 Loss 178.63</span></p>
+<p class="p5"><span class="s1">EPOCH 25 : Temperature 358.95 Length 115 Loss 178.63</span></p>
+<p class="p5"><span class="s1">EPOCH 30 : Temperature 211.96 Length 188 Loss 178.63</span></p>
+<p class="p5"><span class="s1">EPOCH 35 : Temperature 125.16 Length 305 Loss 171.63</span></p>
+<p class="p5"><span class="s1">EPOCH 40 : Temperature 73.90 Length 494 Loss 171.63</span></p>
+<p class="p5"><span class="s1">EPOCH 45 : Temperature 43.64 Length 798 Loss 156.10</span></p>
+<p class="p5"><span class="s1">EPOCH 50 : Temperature 25.77 Length 1287 Loss 151.10</span></p>
+<p class="p5"><span class="s1">EPOCH 55 : Temperature 15.22 Length 2075 Loss 151.10</span></p>
+<p class="p5"><span class="s1">EPOCH 60 : Temperature 8.99 Length 3346 Loss 140.10</span></p>
+<p class="p5"><span class="s1">EPOCH 65 : Temperature 5.31 Length 5392 Loss 132.10</span></p>
+<p class="p5"><span class="s1">EPOCH 70 : Temperature 3.13 Length 8687 Loss 129.10</span></p>
+<p class="p5"><span class="s1">EPOCH 75 : Temperature 1.85 Length 13994 Loss 116.10</span></p>
+<p class="p5"><span class="s1">EPOCH 80 : Temperature 1.09 Length 22541 Loss 102.10</span></p>
+<p class="p5"><span class="s1">EPOCH 85 : Temperature 0.65 Length 36306 Loss 89.10</span></p>
+<p class="p5"><span class="s1">------</span></p>
+<p class="p6"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">Frac accepted :<span class="Apple-converted-space">  </span>0.06363939785535178<span class="Apple-converted-space"> </span></span></p>
+<p class="p5"><span class="s1">Total iterations :<span class="Apple-converted-space">  </span>584245<span class="Apple-converted-space"> </span></span></p>
+<p class="p5"><span class="s1">Solution : [Week(m=2, tu=1, w=2, th=2, f=9, sa=9, su=2), Week(m=4, tu=4, w=4, th=5, f=1, sa=4, su=5), Week(m=4, tu=4, w=7, th=4, f=4, sa=4, su=7), Week(m=1, tu=2, w=9, th=2, f=2, sa=2, su=2), Week(m=3, tu=3, w=3, th=8, f=7, sa=3, su=3), Week(m=0, tu=0, w=4, th=4, f=4, sa=4, su=0), Week(m=3, tu=9, w=3, th=1, f=3, sa=3, su=3), Week(m=4, tu=4, w=4, th=1, f=4, sa=7, su=4), Week(m=8, tu=3, w=3, th=3, f=1, sa=7, su=3), Week(m=2, tu=3, w=6, th=0, f=9, sa=5, su=4)]</span></p>
+<p class="p5"><span class="s1">Final Energy : 89.1008403361 Final length : 53158</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Let's see what our loss looks like</span></p>
+<p class="p4"><span class="s1">In [27]:</span></p>
+<p class="p5"><span class="s1">acc_df = pd.DataFrame(acc)</span></p>
+<p class="p4"><span class="s1">In [28]:</span></p>
+<p class="p5"><span class="s1">plt.plot(acc_df.loss)</span></p>
+<p class="p4"><span class="s1">Out[28]:</span></p>
+<p class="p5"><span class="s1">[&lt;matplotlib.lines.Line2D at 0x1a249829b0&gt;]</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p4"><span class="s1"><img src="file:///unknown.png" alt="unknown.png"><span class="Apple-converted-space"> </span></span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Ok cool. Looks like we do get to a steady state towards the end. Play around with changing the initial temp, tempfunc, and lengthfunc and see if you can improve it. Here's the best solution and the best loss</span></p>
+<p class="p4"><span class="s1">In [29]:</span></p>
+<p class="p5"><span class="s1">bs, be</span></p>
+<p class="p4"><span class="s1">Out[29]:</span></p>
+<p class="p5"><span class="s1">([Week(m=3, tu=3, w=3, th=3, f=1, sa=8, su=3),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=5, tu=5, w=9, th=5, f=9, sa=1, su=8),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=9, tu=2, w=1, th=9, f=2, sa=9, su=2),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=1, tu=5, w=5, th=8, f=5, sa=5, su=5),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=8, tu=3, w=5, th=5, f=3, sa=3, su=3),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=5, tu=2, w=5, th=7, f=7, sa=5, su=2),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=6, tu=7, w=7, th=8, f=6, sa=6, su=6),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=1, tu=3, w=3, th=7, f=3, sa=3, su=3),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=2, tu=6, w=6, th=6, f=2, sa=2, su=2),</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space">  </span>Week(m=2, tu=3, w=6, th=0, f=9, sa=5, su=4)],</span></p>
+<p class="p5"><span class="s1"><span class="Apple-converted-space"> </span>89.100840336134468)</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Let's visualize the schedule</span></p>
+<p class="p4"><span class="s1">In [30]:</span></p>
+<p class="p5"><span class="s1">_ = plot_schedule(bs)</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p4"><span class="s1"><img src="file:///unknown_1.png" alt="unknown_1.png"><span class="Apple-converted-space"> </span></span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<h2 style="margin: 0.0px 0.0px 14.9px 0.0px; line-height: 22.0px; font: 18.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>Discussion</b></span><span class="s2"><b>¶</b></span></h2>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p3"><span class="s1">Check out the <i>preferred_length</i> and <i>staff cost</i> (if you used it) and see if the results make sense. For one, why does '0' just get one shift? Same with '4'? Might be that someone has to miss out given the contraints. Maybe the loss from shift_loss should be quadratic - further away you are from optimum, greater the loss.</span></p>
+<p class="p4"><span class="s1">In [37]:</span></p>
+<p class="p5"><span class="s1">print("Preferred_length:\t", dict(zip(range(10), preferred_len)))</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">Preferred_length<span class="Apple-tab-span">	</span> {0: 4, 1: 1, 2: 4, 3: 5, 4: 5, 5: 5, 6: 4, 7: 2, 8: 1, 9: 3}</span></p>
+<p class="p4"><span class="s1">In [38]:</span></p>
+<p class="p5"><span class="s1">print("Staff_cost:\t\t", dict(zip(range(10), cost)))</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p5"><span class="s1">Staff_cost:<span class="Apple-tab-span">	</span><span class="Apple-tab-span">	</span> {0: 1, 1: 6, 2: 5, 3: 5, 4: 1, 5: 6, 6: 4, 7: 5, 8: 5, 9: 1}</span></p>
+<p class="p1"><span class="s1"></span><br></p>
+<ul class="ul1">
+  <li class="li4"><span class="s3"></span><span class="s1">Can you figure out ways to improve it?<span class="Apple-converted-space"> </span></span></li>
+  <li class="li4"><span class="s3"></span><span class="s1">Can that be coded in the loss function?<span class="Apple-converted-space"> </span></span></li>
+  <li class="li4"><span class="s3"></span><span class="s1">Can we use that to come up with a better proposal function?</span></li>
+</ul>
+<p class="p1"><span class="s1"></span><br></p>
+<h2 style="margin: 0.0px 0.0px 14.9px 0.0px; line-height: 22.0px; font: 18.0px Times; color: #000000; -webkit-text-stroke: #000000"><span class="s1"><b>Conclusion</b></span><span class="s2"><b>¶</b></span></h2>
+<p class="p3"><span class="s1">I hope this gave you a rough idea on how to use simulated annealing. If you come up with cool proposal functions or fancier loss functions, I'd love to hear about this: <a href="https://sidravi1.com/"><span class="s2">https://sidravi1.com/</span></a></span></p>
+</body>
+</html>
